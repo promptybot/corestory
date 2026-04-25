@@ -1,0 +1,482 @@
+import { useState, useRef } from 'react'
+import Head from 'next/head'
+
+const SECTIONS = [
+  { key: 'target',     label: 'Ideal client / target market' },
+  { key: 'uvp',        label: 'Unique value proposition (UVP)' },
+  { key: 'objections', label: 'Common buying objections' },
+  { key: 'stat1',      label: 'WOW statistic #1' },
+  { key: 'stat2',      label: 'WOW statistic #2' },
+  { key: 'stat3',      label: 'WOW statistic #3' },
+  { key: 'pain1',      label: 'Pain point #1' },
+  { key: 'pain2',      label: 'Pain point #2' },
+  { key: 'pain3',      label: 'Pain point #3' },
+  { key: 'step1',      label: 'Strategy / step #1' },
+  { key: 'step2',      label: 'Strategy / step #2' },
+  { key: 'step3',      label: 'Strategy / step #3' },
+  { key: 'pos_unique', label: 'What competitors miss' },
+  { key: 'pos_proof',  label: 'Client results & transformation' },
+  { key: 'pos_criteria', label: 'Ideal buying criteria' },
+]
+
+const OUTPUT_SECTIONS = [
+  { key: 'title',                label: 'Presentation title' },
+  { key: 'uvp_statement',        label: 'Unique value proposition' },
+  { key: 'landscape',            label: 'Market landscape: statistics & trends' },
+  { key: 'pain1_narrative',      label: 'Pain point 1' },
+  { key: 'pain2_narrative',      label: 'Pain point 2' },
+  { key: 'pain3_narrative',      label: 'Pain point 3' },
+  { key: 'strategy1_narrative',  label: 'Strategy 1' },
+  { key: 'strategy2_narrative',  label: 'Strategy 2' },
+  { key: 'strategy3_narrative',  label: 'Strategy 3' },
+  { key: 'positioning_narrative','label': 'Positioning' },
+  { key: 'sponsor_narrative',    label: 'Offer & call to action' },
+  { key: 'stadium_pitch',        label: 'Stadium pitch (30-second summary)' },
+]
+
+export default function Home() {
+  const [step, setStep] = useState('intake')   // intake | review | generating | output
+  const [analyzing, setAnalyzing] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [genMessage, setGenMessage] = useState('Crafting your Core Story...')
+  const [copied, setCopied] = useState(false)
+
+  // Intake fields
+  const [intake, setIntake] = useState({
+    businessName: '',
+    websiteUrl: '',
+    businessType: '',
+    offerName: '',
+    offerPrice: '',
+    offerDesc: '',
+    offerValue: '',
+    cta: '',
+  })
+
+  // AI pre-filled + editable answers
+  const [answers, setAnswers] = useState({})
+  const [story, setStory] = useState(null)
+  const [error, setError] = useState('')
+
+  const outputRef = useRef(null)
+
+  function updateIntake(k, v) { setIntake(p => ({ ...p, [k]: v })) }
+  function updateAnswer(k, v) { setAnswers(p => ({ ...p, [k]: v })) }
+
+  // ── Step 1: Analyze website + AI pre-fill ──────────────────────────────────
+  async function handleAnalyze() {
+    if (!intake.businessName || !intake.businessType) {
+      setError('Please enter your business name and type before continuing.')
+      return
+    }
+    setError('')
+    setAnalyzing(true)
+    try {
+      const res = await fetch('/api/story', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'analyze', payload: intake })
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setAnswers(data.prefilled)
+      setStep('review')
+    } catch (e) {
+      setError('Analysis failed: ' + e.message)
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  // ── Step 2: Generate full Core Story ───────────────────────────────────────
+  async function handleGenerate() {
+    setGenerating(true)
+    setStep('generating')
+    const messages = [
+      'Analyzing your market landscape...',
+      'Identifying buyer pain points...',
+      'Crafting your steps and strategies...',
+      'Positioning your company...',
+      'Writing your Core Story...',
+      'Polishing the final narrative...',
+    ]
+    let i = 0
+    const interval = setInterval(() => {
+      setGenMessage(messages[Math.min(++i, messages.length - 1)])
+    }, 2200)
+
+    try {
+      const payload = { ...intake, ...answers }
+      const res = await fetch('/api/story', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'generate', payload })
+      })
+      const data = await res.json()
+      clearInterval(interval)
+      if (data.error) throw new Error(data.error)
+      setStory(data.story)
+      setStep('output')
+      setTimeout(() => outputRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+    } catch (e) {
+      clearInterval(interval)
+      setError('Generation failed: ' + e.message)
+      setStep('review')
+      setGenerating(false)
+    }
+  }
+
+  // ── Download ───────────────────────────────────────────────────────────────
+  function getPlainText() {
+    if (!story) return ''
+    let txt = `${intake.businessName.toUpperCase()} — CORE STORY\n`
+    txt += `Generated by Promptly Core Story Builder\n`
+    txt += '='.repeat(60) + '\n\n'
+    OUTPUT_SECTIONS.forEach(({ key, label }) => {
+      if (story[key]) txt += `${label.toUpperCase()}\n${'-'.repeat(label.length)}\n${story[key]}\n\n`
+    })
+    return txt
+  }
+
+  function handleDownload() {
+    const txt = getPlainText()
+    const blob = new Blob([txt], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${intake.businessName.replace(/\s+/g, '_')}_Core_Story.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function handleCopy() {
+    navigator.clipboard.writeText(getPlainText()).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  // ── UI ─────────────────────────────────────────────────────────────────────
+  return (
+    <>
+      <Head>
+        <title>Promptly — Core Story Builder</title>
+        <meta name="description" content="Generate your complete business Core Story in minutes using AI" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='16' fill='%231D9E75'/><path d='M10 16l4 4 8-8' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+      </Head>
+
+      <div className="min-h-screen bg-gray-50">
+
+        {/* ── Nav ── */}
+        <nav className="bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between sticky top-0 z-50">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-brand-500 rounded-lg flex items-center justify-center flex-shrink-0">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M3 8l3.5 3.5L13 4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <div>
+              <span className="font-semibold text-gray-900 text-sm">Promptly</span>
+              <span className="text-gray-400 text-sm ml-2">Core Story Builder</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400 hidden sm:block">Powered by Claude AI</span>
+            {step !== 'intake' && (
+              <button onClick={() => { setStep('intake'); setStory(null); setAnswers({}) }}
+                className="btn-ghost text-xs">
+                Start over
+              </button>
+            )}
+          </div>
+        </nav>
+
+        <main className="max-w-3xl mx-auto px-4 py-10">
+
+          {/* ── HERO (intake only) ── */}
+          {step === 'intake' && (
+            <div className="mb-10 text-center">
+              <div className="inline-flex items-center gap-2 bg-brand-50 text-brand-700 text-xs font-medium px-3 py-1.5 rounded-full mb-4 border border-brand-200">
+                <span className="w-1.5 h-1.5 bg-brand-500 rounded-full"></span>
+                Built on the Empire Research Group Core Story methodology
+              </div>
+              <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4 leading-tight">
+                Generate your complete<br />
+                <span className="text-brand-500">Core Story</span> in minutes
+              </h1>
+              <p className="text-gray-500 text-base max-w-xl mx-auto leading-relaxed">
+                Tell us the basics about your business. Our AI analyzes your market, 
+                industry psychology, and buyer behavior to pre-fill your entire buying narrative — 
+                then you review, edit, and generate.
+              </p>
+            </div>
+          )}
+
+          {/* ── Progress bar ── */}
+          {(step === 'review' || step === 'output') && (
+            <div className="mb-8">
+              <div className="flex items-center gap-3 mb-2">
+                {['intake','review','output'].map((s, i) => (
+                  <div key={s} className="flex items-center gap-2">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium transition-all ${
+                      step === s ? 'bg-brand-500 text-white' :
+                      ['intake','review','output'].indexOf(step) > i ? 'bg-brand-100 text-brand-700' :
+                      'bg-gray-100 text-gray-400'}`}>
+                      {['intake','review','output'].indexOf(step) > i ? '✓' : i+1}
+                    </div>
+                    <span className="text-xs text-gray-500 hidden sm:block capitalize">{s === 'intake' ? 'Your Info' : s === 'review' ? 'Review & Edit' : 'Core Story'}</span>
+                    {i < 2 && <div className="w-8 h-px bg-gray-200" />}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── ERROR ── */}
+          {error && (
+            <div className="mb-6 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-700 text-sm">
+              {error}
+            </div>
+          )}
+
+          {/* ════════════════════════════════════════════
+              STEP 1 — INTAKE FORM
+          ═════════════════════════════════════════════ */}
+          {step === 'intake' && (
+            <div className="card p-8">
+              <h2 className="text-lg font-semibold text-gray-900 mb-1">Tell us about your business</h2>
+              <p className="text-sm text-gray-500 mb-6">Just the essentials — our AI fills in the rest using your website and industry knowledge.</p>
+
+              <div className="space-y-5">
+
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">Business name <span className="text-brand-500">*</span></label>
+                    <input className="input-field" placeholder="e.g. Promptly" value={intake.businessName}
+                      onChange={e => updateIntake('businessName', e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">Business type / niche <span className="text-brand-500">*</span></label>
+                    <input className="input-field" placeholder="e.g. White-label GoHighLevel agency" value={intake.businessType}
+                      onChange={e => updateIntake('businessType', e.target.value)} />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                    Website URL
+                    <span className="ml-2 text-gray-400 font-normal">(optional — we'll scrape it to personalize your story)</span>
+                  </label>
+                  <input className="input-field" placeholder="https://yourwebsite.com" value={intake.websiteUrl}
+                    onChange={e => updateIntake('websiteUrl', e.target.value)} />
+                </div>
+
+                <hr className="border-gray-100" />
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Your offer</p>
+
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">Offer / package name</label>
+                    <input className="input-field" placeholder="e.g. The Market Dominator" value={intake.offerName}
+                      onChange={e => updateIntake('offerName', e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">Pricing</label>
+                    <input className="input-field" placeholder="e.g. $10,000 setup + $5,500/mo" value={intake.offerPrice}
+                      onChange={e => updateIntake('offerPrice', e.target.value)} />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">What's included in the offer?</label>
+                  <textarea className="input-field" rows={3} placeholder="e.g. Full CRM setup, automation workflows, lead follow-up sequences, reputation management, monthly optimization..."
+                    value={intake.offerDesc} onChange={e => updateIntake('offerDesc', e.target.value)} />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">How should buyers think about the investment? (ROI framing)</label>
+                  <textarea className="input-field" rows={2} placeholder="e.g. The system typically pays for itself when it converts 2-3 additional clients per month that would otherwise be lost..."
+                    value={intake.offerValue} onChange={e => updateIntake('offerValue', e.target.value)} />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">Call to action</label>
+                  <input className="input-field" placeholder="e.g. Book a free demo" value={intake.cta}
+                    onChange={e => updateIntake('cta', e.target.value)} />
+                </div>
+              </div>
+
+              <div className="mt-8 flex flex-col sm:flex-row items-center gap-4">
+                <button onClick={handleAnalyze} disabled={analyzing}
+                  className="btn-primary w-full sm:w-auto flex items-center justify-center gap-2">
+                  {analyzing ? (
+                    <>
+                      <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                      </svg>
+                      Analyzing your business...
+                    </>
+                  ) : (
+                    <>Analyze & pre-fill my story <span>→</span></>
+                  )}
+                </button>
+                <p className="text-xs text-gray-400">AI pre-fills 15 questions using your website + industry knowledge</p>
+              </div>
+            </div>
+          )}
+
+          {/* ════════════════════════════════════════════
+              STEP 2 — REVIEW & EDIT AI ANSWERS
+          ═════════════════════════════════════════════ */}
+          {step === 'review' && (
+            <div>
+              <div className="card p-6 mb-6">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-brand-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <path d="M8 1l1.8 3.6L14 5.3l-3 2.9.7 4.1L8 10.4l-3.7 1.9.7-4.1-3-2.9 4.2-.7z" fill="#1D9E75"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-semibold text-gray-900 mb-1">AI pre-fill complete</h2>
+                    <p className="text-xs text-gray-500 leading-relaxed">
+                      We've pre-filled your Core Story answers using industry knowledge and your website. 
+                      Review each field below — edit anything that doesn't fit your specific situation — then hit Generate.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Group sections */}
+              {[
+                { heading: 'Target market & positioning', keys: ['target','uvp','objections'] },
+                { heading: 'Market landscape — WOW statistics', keys: ['stat1','stat2','stat3'] },
+                { heading: 'Pain points', keys: ['pain1','pain2','pain3'] },
+                { heading: 'Steps & strategies', keys: ['step1','step2','step3'] },
+                { heading: 'Competitive positioning', keys: ['pos_unique','pos_proof','pos_criteria'] },
+              ].map(group => (
+                <div key={group.heading} className="card p-6 mb-4">
+                  <h3 className="section-label mb-4">{group.heading}</h3>
+                  <div className="space-y-4">
+                    {group.keys.map(k => {
+                      const sec = SECTIONS.find(s => s.key === k)
+                      return (
+                        <div key={k}>
+                          <label className="block text-xs font-medium text-gray-600 mb-1.5">{sec?.label}</label>
+                          <textarea
+                            className="input-field"
+                            rows={3}
+                            value={answers[k] || ''}
+                            onChange={e => updateAnswer(k, e.target.value)}
+                          />
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+
+              <div className="flex flex-col sm:flex-row gap-3 mt-6">
+                <button onClick={handleGenerate}
+                  className="btn-primary flex items-center justify-center gap-2 text-base py-4 px-8">
+                  Generate my Core Story
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+                <button onClick={() => setStep('intake')} className="btn-secondary">
+                  ← Edit business info
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ════════════════════════════════════════════
+              GENERATING STATE
+          ═════════════════════════════════════════════ */}
+          {step === 'generating' && (
+            <div className="card p-16 text-center">
+              <div className="w-14 h-14 bg-brand-50 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <svg className="animate-spin w-7 h-7 text-brand-500" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                </svg>
+              </div>
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">Writing your Core Story</h2>
+              <p className="text-gray-500 text-sm">{genMessage}</p>
+              <div className="mt-6 flex justify-center gap-1.5">
+                {[0,1,2].map(i => (
+                  <div key={i} className="w-1.5 h-1.5 bg-brand-300 rounded-full animate-bounce"
+                    style={{ animationDelay: `${i * 0.15}s` }} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ════════════════════════════════════════════
+              STEP 3 — OUTPUT
+          ═════════════════════════════════════════════ */}
+          {step === 'output' && story && (
+            <div ref={outputRef}>
+              {/* Action bar */}
+              <div className="card p-4 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900">{intake.businessName} — Core Story</h2>
+                  <p className="text-xs text-gray-400 mt-0.5">Generated using the Empire Research Group framework</p>
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <button onClick={handleDownload} className="btn-primary text-sm py-2 px-4">
+                    Download .txt
+                  </button>
+                  <button onClick={handleCopy} className="btn-secondary text-sm py-2 px-4">
+                    {copied ? '✓ Copied!' : 'Copy text'}
+                  </button>
+                  <button onClick={() => { setStep('review') }} className="btn-secondary text-sm py-2 px-4">
+                    Edit answers
+                  </button>
+                </div>
+              </div>
+
+              {/* Stadium pitch callout */}
+              {story.stadium_pitch && (
+                <div className="bg-brand-500 rounded-2xl p-6 mb-6 text-white">
+                  <p className="text-xs font-semibold uppercase tracking-wider opacity-75 mb-2">Stadium pitch — 30-second summary</p>
+                  <p className="text-sm leading-relaxed">{story.stadium_pitch}</p>
+                </div>
+              )}
+
+              {/* Story sections */}
+              {OUTPUT_SECTIONS.filter(s => s.key !== 'stadium_pitch').map(({ key, label }) => (
+                story[key] ? (
+                  <div key={key} className="card p-6 mb-4">
+                    <p className="section-label mb-3">{label}</p>
+                    {key === 'title' || key === 'uvp_statement' ? (
+                      <p className="text-gray-900 font-medium text-base leading-relaxed">{story[key]}</p>
+                    ) : (
+                      <div className="text-gray-700 text-sm leading-relaxed space-y-3">
+                        {story[key].split('\n').filter(Boolean).map((p, i) => (
+                          <p key={i}>{p}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : null
+              ))}
+
+              {/* Bottom CTA */}
+              <div className="card p-6 mt-6 bg-gray-50 border-gray-100">
+                <p className="text-xs text-gray-500 text-center">
+                  Built with the Empire Research Group Core Story methodology (13-session DIY course, 2011) •{' '}
+                  Powered by <span className="text-brand-600 font-medium">Promptly</span>
+                </p>
+              </div>
+            </div>
+          )}
+
+        </main>
+      </div>
+    </>
+  )
+}
